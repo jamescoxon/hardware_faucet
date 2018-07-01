@@ -11,6 +11,9 @@ from bitstring import BitArray
 from pyblake2 import blake2b
 from pure25519 import ed25519_oop as ed25519
 
+from papirus import PapirusText
+text = PapirusText()
+
 def private_public(private):
     return ed25519.SigningKey(private).get_verifying_key().to_bytes()
 
@@ -374,8 +377,10 @@ camera = picamera.PiCamera()
 
 camera.color_effects = (128, 128)
 
+text.write("Nano Hardware Faucet    Waiting for QR Code")
+
+
 while 1:
-  #print("Taking Pic")
 
   camera.capture('image.jpg')
 
@@ -384,6 +389,7 @@ while 1:
   result = decode(Image.open('image.jpg'))
 
   if len(result) > 0:
+    text.write("Found QR Code")
 
     print(result[0].data)
     # Check DB
@@ -392,10 +398,18 @@ while 1:
     if user_details != None:
         print("Already in DB")
         print(user_details)
+        text.write("Sorry - address already in db")
+        time.sleep(10)
+        text.write("Nano Hardware Faucet    Waiting for QR Code")
+
     else:
         print("Not in DB")
         user_table.insert(dict(address=result[0].data, requests=0, time=time.time()))
         #Now Send Nano to Address
+        message = "Sending 0.0001 Nano to %s..." % (result[0].data.decode("utf-8")[:9])
+        text.write(message)
 
         #Create send block with destination address
         send_xrb(result[0].data.decode("utf-8") )
+
+        text.write("Nano Hardware Faucet    Waiting for QR Code")
