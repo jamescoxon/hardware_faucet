@@ -2,7 +2,7 @@ import picamera
 import dataset
 from pyzbar.pyzbar import decode
 from PIL import Image
-import time, getpass, sys, json
+import time, getpass, sys, json, settings
 from simplecrypt import encrypt, decrypt
 from websocket import create_connection
 
@@ -156,20 +156,12 @@ def get_balance(hash):
 
 def send_xrb(dest_account):
     representative = 'xrb_1kd4h9nqaxengni43xy9775gcag8ptw8ddjifnm77qes1efuoqikoqy5sjq3'
-    #Get pending blocks
-    rx_data = get_pending()
-    for block in rx_data:
-      print(block)
-      block_hash = block
-      print(rx_data[block])
-      balance = int(rx_data[block]['amount'])
-      source = rx_data[block]['source']
 
     previous = get_previous(str(account))
 
     current_balance = get_balance(previous)
     print(current_balance)
-    new_balance = int(current_balance) - 100000000000000000000000000
+    new_balance = int(current_balance) - 50000000000000000000000000000
     hex_balance = hex(new_balance)
 
     print(hex_balance)
@@ -327,19 +319,19 @@ def read_encrypted(password, filename, string=True):
       else:
           return plaintext
 
-while True:
-  password = getpass.getpass('Enter password: ')
-  password_confirm = getpass.getpass('Confirm password: ')
-  if password == password_confirm:
-      break
-  print("Password Mismatch!")
+#while True:
+#  password = getpass.getpass('Enter password: ')
+#  password_confirm = getpass.getpass('Confirm password: ')
+#  if password == password_confirm:
+#      break
+#  print("Password Mismatch!")
 
-  print("Decoding wallet seed with your password")
+#  print("Decoding wallet seed with your password")
 
 try:
   print("Decoding Seed (this might take some time...")
   #seed = read_encrypted(password, 'seed.txt', string=True)
-  seed = "1DA6230BA4377E396CE3F892306C6C5301895C113ED282AD8B5E5E42329A4572"
+  seed = settings.seed
 except:
   print('\nError decoding seed, check password and try again')
   sys.exit()
@@ -361,12 +353,13 @@ if len(previous) == 0:
    pending = get_pending()
    print("Pending: ", pending)
 
-#   open_xrb()
+   open_xrb()
 else:
    pending = get_pending()
-   print("Pending: ", pending)
-
-#   receive_xrb()
+   print("Rx Pending: ", pending)
+   print(len(pending))
+   if len(pending) > 0:
+       receive_xrb()
 
 print("Done")
 
@@ -379,6 +372,7 @@ camera.color_effects = (128, 128)
 
 text.write("Nano Hardware Faucet    Waiting for QR Code")
 
+loop_count = 0
 
 while 1:
 
@@ -391,25 +385,71 @@ while 1:
   if len(result) > 0:
     text.write("Found QR Code")
 
-    print(result[0].data)
-    # Check DB
-    user_details = user_table.find_one(address=result[0].data)
-    # If not in db, add
-    if user_details != None:
-        print("Already in DB")
-        print(user_details)
-        text.write("Sorry - address already in db")
-        time.sleep(10)
-        text.write("Nano Hardware Faucet    Waiting for QR Code")
+    qr_code = result[0].data.decode("utf-8")
+    print(qr_code)
 
-    else:
+    if len(qr_code) > 0:
+        if qr_code[3] == ":":
+           qr_code = qr_code[4:]
+
+    try:
+        ws = create_connection('ws://yapraiwallet.space:8000')
+    except:
+        pass
+
+    pending = get_pending()
+    if len(pending) > 0:
+       receive_xrb()
+       text.write("Funds Received - Woooo")
+       time.sleep(5)
+       print("Rx complete")
+
+    # Check DB
+    user_details = user_table.find_one(address=qr_code)
+    # If not in db, add
+    if user_details == None:
+        loop_count += 1
+
         print("Not in DB")
-        user_table.insert(dict(address=result[0].data, requests=0, time=time.time()))
         #Now Send Nano to Address
-        message = "Sending 0.0001 Nano to %s..." % (result[0].data.decode("utf-8")[:9])
+        message = "Sending 0.05 Nano to %s..." % (qr_code[:9])
         text.write(message)
 
         #Create send block with destination address
-        send_xrb(result[0].data.decode("utf-8") )
+        try:
+            send_xrb(qr_code)
 
-        text.write("Nano Hardware Faucet    Waiting for QR Code")
+            user_table.insert(dict(address=qr_code, requests=0, time=int(time.time()), loop=loop_count, claim=1))
+
+            text.write("Nano Hardware Faucet    Waiting for QR Code")
+        except:
+            text.write("Error couldn't connect to network")
+            time.sleep(5)
+
+    else:
+        loop_count += 1
+        print("Already in DB")
+        #Check time
+        print(user_details['time'])
+        if int(user_details['claim']) > 4:
+            text.write("Claim limit reached")
+        else:
+            if ((int(time.time()) - int(user_details['time'])) > 900) or ((loop_count - int(user_details['loop'])) > 10):
+                message = "Sending 0.05 Nano to %s..." % (qr_code[:9])
+                text.write(message)
+                try:
+                    send_xrb(qr_code)
+                    user_table.update(dict(address=qr_code, time=int(time.time()), loop=loop_count, claim=(int(user_details['claim']) + 1)), ['address'])
+                except:
+                    text.write("Error couldn't connect to network")
+                    time.sleep(5)
+
+            else:
+                claims_left = 10 - (int(loop_count) - int(user_details['loop']))
+                mins_left = (int(time.time()) - int(user_details['time'])) / 60
+                text.write("To quick, wait %d mins or %d claims" % ( mins_left, claims_left ))
+
+            time.sleep(10)
+            text.write("Nano Hardware Faucet    Waiting for QR Code")
+
+
